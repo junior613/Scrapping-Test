@@ -1,59 +1,95 @@
 import streamlit as st
-from flask import Flask, render_template, request, send_from_directory, jsonify
+import time
 import os
 import scraper
 import exporter
-import threading
 
-app = Flask(__name__)
+# Configuration de la page
+st.set_page_config(page_title="Scraper Annuaire Cameroun", page_icon="🇨🇲", layout="wide")
+
 EXPORT_DIR = os.path.join(os.getcwd(), "exports")
 if not os.path.exists(EXPORT_DIR):
     os.makedirs(EXPORT_DIR)
 
-# Cache pour les catégories
-categories_cache = []
+@st.cache_data
+def load_categories():
+    """Charge les catégories avec le système de cache de Streamlit."""
+    return scraper.get_categories()
 
-@app.route('/')
-def index():
-    global categories_cache
-    if not categories_cache:
-        categories_cache = scraper.get_categories()
-    return render_template('index.html', categories=categories_cache)
+def main():
+    st.title("🇨🇲 Scraper GoAfricaOnline - Cameroun")
+    st.markdown("Cette application permet d'extraire les coordonnées des entreprises.")
 
-@app.route('/scrape', methods=['POST'])
-def run_scrape():
-    category_url = request.form.get('category_url')
-    category_name = request.form.get('category_name')
-    max_pages = int(request.form.get('max_pages', 1))
-    
-    if not category_url:
-        return jsonify({"error": "URL de catégorie manquante"}), 400
-        
-    try:
-        # Étape 1: Scrape les entreprises (listing)
-        companies = scraper.scrape_category(category_url, max_pages=max_pages)
-        
-        # Étape 2: Récupère les détails (Site web, etc.)
-        # Limité à 10 pour le test rapide ou selon le besoin
-        for company in companies[:15]: # Limite pour éviter les blocages lors des tests
-            details = scraper.get_company_details(company['detail_url'])
-            company.update(details)
+    # Chargement des catégories (sidebar)
+    with st.sidebar:
+        st.header("Configuration")
+        if st.button("Rafraîchir les catégories"):
+            st.cache_data.clear()
             
-        # Étape 3: Export Excel
-        filename, filepath = exporter.export_to_excel(companies, category_name)
-        
-        return jsonify({
-            "success": True,
-            "count": len(companies),
-            "filename": filename,
-            "companies": companies
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        with st.spinner("Chargement des catégories..."):
+            categories = load_categories()
+            
+        if not categories:
+            st.error("Impossible de charger les catégories.")
+            return
 
-@app.route('/download/<filename>')
-def download_file(filename):
-    return send_from_directory(EXPORT_DIR, filename, as_attachment=True)
+        # Création d'un dictionnaire pour retrouver l'URL via le nom
+        cat_dict = {cat['name']: cat['url'] for cat in categories}
+        selected_cat_name = st.selectbox("Choisir une catégorie", options=list(cat_dict.keys()))
+        selected_cat_url = cat_dict[selected_cat_name]
+        
+        max_pages = st.number_input("Nombre de pages à scraper", min_value=1, max_value=50, value=1)
+        
+        start_scraping = st.button("Lancer le scraping", type="primary")
+
+    # Zone principale
+    if start_scraping:
+        st.subheader(f"Traitement de : {selected_cat_name}")
+        
+        # Étape 1: Scrape listing
+        with st.status("Récupération de la liste des entreprises...", expanded=True) as status:
+            st.write(f"Scraping de {max_pages} pages sur {selected_cat_url}...")
+            companies = scraper.scrape_category(selected_cat_url, max_pages=max_pages)
+            
+            if not companies:
+                status.update(label="Aucune entreprise trouvée.", state="error")
+                return
+            
+            st.write(f"✅ {len(companies)} entreprises trouvées.")
+            
+            # Étape 2: Détails (avec barre de progression)
+            st.write("Récupération des détails (Site web, GPS)...")
+            progress_bar = st.progress(0)
+            
+            # Limite pour éviter les blocages (similaire à ton ancien code)
+            limit = 15
+            companies_to_process = companies[:limit]
+            
+            for i, company in enumerate(companies_to_process):
+                details = scraper.get_company_details(company['detail_url'])
+                company.update(details)
+                progress_bar.progress((i + 1) / len(companies_to_process))
+                # Petit délai pour être gentil avec le serveur
+                time.sleep(0.1) 
+                
+            status.update(label="Scraping terminé !", state="complete", expanded=False)
+
+        # Étape 3: Export et Affichage
+        st.success(f"Opération terminée. {len(companies_to_process)} fiches complétées.")
+        
+        # Aperçu des données
+        st.dataframe(companies_to_process)
+        
+        # Export Excel
+        filename, filepath = exporter.export_to_excel(companies_to_process, selected_cat_name, EXPORT_DIR)
+        
+        with open(filepath, "rb") as f:
+            st.download_button(
+                label="📥 Télécharger le fichier Excel",
+                data=f,
+                file_name=filename,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    main()
