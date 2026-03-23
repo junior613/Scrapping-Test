@@ -26,7 +26,10 @@ def get_categories():
     try:
         response = scrappa_request(ANNUAIRE_URL)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, "lxml")
+        try:
+            soup = BeautifulSoup(response.content, "lxml")
+        except Exception:
+            soup = BeautifulSoup(response.content, "html.parser")
         
         categories = []
         # Les catégories sont dans des colonnes de liens
@@ -68,7 +71,10 @@ def scrape_category(category_url, max_pages=1):
             print(f"Scraping page {page}: {current_url}")
             response = scrappa_request(current_url)
             response.raise_for_status()
-            soup = BeautifulSoup(response.content, "lxml")
+            try:
+                soup = BeautifulSoup(response.content, "lxml")
+            except Exception:
+                soup = BeautifulSoup(response.content, "html.parser")
             
             # Rechercher les blocs d'entreprises
             # Sur GoAfricaOnline, elles sont souvent dans des <article> ou des div structurées
@@ -122,27 +128,34 @@ def get_company_details(detail_url):
     try:
         response = scrappa_request(detail_url)
         response.raise_for_status()
-        soup = BeautifulSoup(response.content, "lxml")
+        try:
+            soup = BeautifulSoup(response.content, "lxml")
+        except Exception:
+            soup = BeautifulSoup(response.content, "html.parser")
         
         # Site web
         web_tag = soup.select_one('a[target="_blank"][rel*="nofollow"]')
         website = web_tag.get("href") if web_tag else "N/A"
         
         # Localisation (Coordonnées GPS depuis le lien Google Maps)
-        map_link = soup.select_one('a[href*="maps.google.com"]')
+        map_link_tag = soup.select_one('a[href*="maps.google.com"]')
         location_coords = "N/A"
-        if map_link:
-            match = re.search(r'daddr=([\d.-]+,[\d.-]+)', map_link.get("href"))
+        google_maps_url = "N/A"
+        if map_link_tag:
+            map_href = map_link_tag.get("href")
+            google_maps_url = map_href
+            match = re.search(r'daddr=([\d.-]+,[\d.-]+)', map_href)
             if match:
                 location_coords = match.group(1)
         
         return {
             "website": website,
-            "coords": location_coords
+            "coords": location_coords,
+            "google_maps_url": google_maps_url
         }
     except Exception as e:
         print(f"Erreur détails {detail_url}: {e}")
-        return {"website": "N/A", "coords": "N/A"}
+        return {"website": "N/A", "coords": "N/A", "google_maps_url": "N/A"}
 
 if __name__ == "__main__":
     # Test rapide

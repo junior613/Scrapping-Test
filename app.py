@@ -1,14 +1,22 @@
 import streamlit as st
-import pandas as pd
-import folium
-from streamlit_folium import st_folium
-import time
 import os
-import scraper
-import exporter
+import time
 
 # Configuration de la page
 st.set_page_config(page_title="Scraper Annuaire Cameroun", page_icon="🇨🇲", layout="wide")
+
+# Vérification des dépendances et imports sécurisés
+try:
+    import pandas as pd
+    import folium
+    from streamlit_folium import st_folium
+    import scraper
+    import exporter
+except ImportError as e:
+    st.error(f"🛑 Une bibliothèque nécessaire est manquante : `{e.name}`")
+    st.warning("Pour corriger ce problème, ouvrez votre terminal et lancez la commande suivante :")
+    st.code("pip install -r requirements.txt", language="bash")
+    st.stop()
 
 EXPORT_DIR = os.path.join(os.getcwd(), "exports")
 if not os.path.exists(EXPORT_DIR):
