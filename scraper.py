@@ -19,10 +19,25 @@ HEADERS = {
 
 def scrappa_request(url):
     """Effectue une requête directe (fallback) car Scrappa ne supporte pas l'URL universelle."""
-    return requests.get(url, headers=HEADERS, timeout=15)
+    print(f"DEBUG: Requête vers {url}...")
+    return requests.get(url, headers=HEADERS, timeout=10)
 
 def get_categories():
     """Récupère la liste des catégories depuis la page principale."""
+    # Liste de secours au cas où le site ne répond pas ou change de structure
+    fallback_categories = [
+        {"name": "BTP - Construction", "url": f"{BASE_URL}/cm/annuaire/batiment-btp"},
+        {"name": "Informatique", "url": f"{BASE_URL}/cm/annuaire/informatique"},
+        {"name": "Hôtels", "url": f"{BASE_URL}/cm/annuaire/hotels-hebergement"},
+        {"name": "Transport & Logistique", "url": f"{BASE_URL}/cm/annuaire/transport-logistique"},
+        {"name": "Services aux entreprises", "url": f"{BASE_URL}/cm/annuaire/services-entreprises"},
+        {"name": "Agriculture", "url": f"{BASE_URL}/cm/annuaire/agriculture"},
+        {"name": "Santé", "url": f"{BASE_URL}/cm/annuaire/sante"},
+        {"name": "Alimentation", "url": f"{BASE_URL}/cm/annuaire/alimentation"},
+        {"name": "Enseignement & Formation", "url": f"{BASE_URL}/cm/annuaire/enseignement-formation"},
+        {"name": "Automobile", "url": f"{BASE_URL}/cm/annuaire/automobile-motos"}
+    ]
+
     try:
         response = scrappa_request(ANNUAIRE_URL)
         response.raise_for_status()
@@ -56,10 +71,15 @@ def get_categories():
                 unique_categories.append(cat)
                 seen.add(cat["url"])
         
-        return unique_categories
+        print(f"DEBUG: {len(unique_categories)} catégories trouvées en ligne.")
+        if not unique_categories:
+            print("DEBUG: Aucune catégorie trouvée, utilisation du fallback.")
+            return fallback_categories
+            
+        return sorted(unique_categories, key=lambda x: x['name'])
     except Exception as e:
-        print(f"Erreur lors de la récupération des catégories : {e}")
-        return []
+        print(f"ERREUR (Catégories): {e}. Utilisation de la liste de secours.")
+        return fallback_categories
 
 def scrape_category(category_url, max_pages=1):
     """Scrape les entreprises d'une catégorie donnée."""

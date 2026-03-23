@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import time
+import sys
 
 # Configuration de la page
 st.set_page_config(page_title="Scraper Annuaire Cameroun", page_icon="🇨🇲", layout="wide")
@@ -25,6 +26,7 @@ if not os.path.exists(EXPORT_DIR):
 @st.cache_data
 def load_categories():
     """Charge les catégories avec le système de cache de Streamlit."""
+    print("DEBUG: Chargement des catégories...")
     return scraper.get_categories()
 
 def main():
@@ -40,14 +42,17 @@ def main():
         with st.spinner("Chargement des catégories..."):
             categories = load_categories()
             
-        if not categories:
-            st.error("Impossible de charger les catégories.")
-            return
+        # Mode manuel si les catégories sont vides (ne devrait plus arriver avec le fallback)
+        if not categories: 
+            st.warning("Mode manuel activé (catégories introuvables)")
+            selected_cat_name = "Recherche manuelle"
+            selected_cat_url = st.text_input("URL de la catégorie à scraper", value="https://www.goafricaonline.com/cm/annuaire/informatique")
+        else:
+            # Création d'un dictionnaire pour retrouver l'URL via le nom
+            cat_dict = {cat['name']: cat['url'] for cat in categories}
+            selected_cat_name = st.selectbox("Choisir une catégorie", options=list(cat_dict.keys()))
+            selected_cat_url = cat_dict[selected_cat_name]
 
-        # Création d'un dictionnaire pour retrouver l'URL via le nom
-        cat_dict = {cat['name']: cat['url'] for cat in categories}
-        selected_cat_name = st.selectbox("Choisir une catégorie", options=list(cat_dict.keys()))
-        selected_cat_url = cat_dict[selected_cat_name]
         
         max_pages = st.number_input("Nombre de pages à scraper", min_value=1, max_value=50, value=1)
         limit = st.slider("Limite d'entreprises à analyser (Détails + GPS)", min_value=1, max_value=100, value=15)
@@ -85,60 +90,63 @@ def main():
             status.update(label="Scraping terminé !", state="complete", expanded=False)
 
         # Étape 3: Export et Affichage
-        st.success(f"Opération terminée. {len(companies_to_process)} fiches complétées.")
+        if companies_to_process:
+            st.success(f"Opération terminée. {len(companies_to_process)} fiches complétées.")
         
-        # --- CARTE INTERACTIVE AVEC FOLIUM ---
-
-        # 1. Filtrer les entreprises avec des coordonnées valides
-        companies_with_coords = []
-        for c in companies_to_process:
-            coords = c.get('coords', 'N/A')
-            if coords and coords != 'N/A' and ',' in str(coords):
-                try:
-                    lat, lon = map(float, coords.split(','))
-                    c['lat'] = lat
-                    c['lon'] = lon
-                    companies_with_coords.append(c)
-                except (ValueError, IndexError):
-                    continue
-        
-        if not companies_with_coords:
-            st.warning("Aucune coordonnée GPS trouvée pour afficher sur la carte.")
-        else:
-            # 2. Créer un selectbox pour choisir une entreprise
-            company_names = ["- Vue d'ensemble -"] + [c['name'] for c in companies_with_coords]
-            selected_name = st.selectbox("🎯 Choisir une entreprise pour la localiser", options=company_names)
-
-            # 3. Déterminer le centre de la carte et le zoom
-            map_center = [6, 12] # Centre approximatif du Cameroun
-            map_zoom = 6
-            selected_company_obj = None
-
-            if selected_name != "- Vue d'ensemble -":
-                selected_company_obj = next((c for c in companies_with_coords if c['name'] == selected_name), None)
-                if selected_company_obj:
-                    map_center = [selected_company_obj['lat'], selected_company_obj['lon']]
-                    map_zoom = 17
-
-            # 4. Créer et afficher la carte Folium
-            st.subheader(f"📍 Carte interactive ({len(companies_with_coords)} localisées)")
-            m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="cartodbdark_matter")
-
-            for company in companies_with_coords:
-                popup_html = f"<b>{company['name']}</b>"
-                if company.get('google_maps_url') and company['google_maps_url'] != 'N/A':
-                    popup_html += f'<br><a href="{company["google_maps_url"]}" target="_blank">Ouvrir dans Google Maps</a>'
+            # --- CARTE INTERACTIVE AVEC FOLIUM ---
+            try:
+                # 1. Filtrer les entreprises avec des coordonnées valides
+                companies_with_coords = []
+                for c in companies_to_process:
+                    coords = c.get('coords', 'N/A')
+                    if coords and coords != 'N/A' and ',' in str(coords):
+                        try:
+                            lat, lon = map(float, coords.split(','))
+                            c['lat'] = lat
+                            c['lon'] = lon
+                            companies_with_coords.append(c)
+                        except (ValueError, IndexError):
+                            continue
                 
-                is_selected = (selected_company_obj and company['name'] == selected_company_obj['name'])
-                
-                folium.Marker(
-                    location=[company['lat'], company['lon']],
-                    popup=folium.Popup(popup_html, max_width=300),
-                    tooltip=company['name'],
-                    icon=folium.Icon(color='red' if is_selected else 'blue', icon='star' if is_selected else 'info-sign')
-                ).add_to(m)
+                if not companies_with_coords:
+                    st.info("Aucune coordonnée GPS trouvée pour afficher sur la carte.")
+                else:
+                    # 2. Créer un selectbox pour choisir une entreprise
+                    company_names = ["- Vue d'ensemble -"] + [c['name'] for c in companies_with_coords]
+                    selected_name = st.selectbox("🎯 Choisir une entreprise pour la localiser", options=company_names)
 
-            st_folium(m, width=725, height=500)
+                    # 3. Déterminer le centre de la carte et le zoom
+                    map_center = [4.5, 12.5] # Centre approximatif du Cameroun
+                    map_zoom = 6
+                    selected_company_obj = None
+
+                    if selected_name != "- Vue d'ensemble -":
+                        selected_company_obj = next((c for c in companies_with_coords if c['name'] == selected_name), None)
+                        if selected_company_obj:
+                            map_center = [selected_company_obj['lat'], selected_company_obj['lon']]
+                            map_zoom = 15
+
+                    # 4. Créer et afficher la carte Folium
+                    st.subheader(f"📍 Carte interactive ({len(companies_with_coords)} localisées)")
+                    m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="cartodbdark_matter")
+
+                    for company in companies_with_coords:
+                        popup_html = f"<b>{company['name']}</b>"
+                        if company.get('google_maps_url') and company['google_maps_url'] != 'N/A':
+                            popup_html += f'<br><a href="{company["google_maps_url"]}" target="_blank">Ouvrir dans Google Maps</a>'
+                        
+                        is_selected = (selected_company_obj and company['name'] == selected_company_obj['name'])
+                        
+                        folium.Marker(
+                            location=[company['lat'], company['lon']],
+                            popup=folium.Popup(popup_html, max_width=300),
+                            tooltip=company['name'],
+                            icon=folium.Icon(color='red' if is_selected else 'blue', icon='star' if is_selected else 'info-sign')
+                        ).add_to(m)
+
+                    st_folium(m, width=725, height=500)
+            except Exception as e:
+                st.error(f"Erreur d'affichage de la carte: {e}")
 
         # Aperçu des données
         st.subheader("📋 Données brutes")
