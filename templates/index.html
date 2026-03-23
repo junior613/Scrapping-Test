@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scraper Entreprises Cameroun</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="container">
+        <header>
+            <h1>Cameroon Business <span class="accent">Scraper</span></h1>
+            <p>Extrayez les données professionnelles en un clic</p>
+        </header>
+
+        <style>
+            .clickable-name {
+                color: var(--accent);
+                cursor: pointer;
+                text-decoration: underline;
+                transition: opacity 0.2s;
+            }
+            .clickable-name:hover {
+                opacity: 0.8;
+            }
+            .map-hint {
+                margin-top: 10px;
+                font-size: 0.9rem;
+                color: #888;
+                text-align: center;
+            }
+        </style>
+
+        <section class="card selection-box">
+            <div class="tabs">
+                <button class="tab-btn active" data-target="scrape-form">Secteurs (GoAfricaOnline)</button>
+                <button class="tab-btn" data-target="map-container">Carte Interactive</button>
+            </div>
+
+            <form id="scrape-form" class="tab-content active">
+                <div class="form-group">
+                    <label for="category">Choisir une catégorie :</label>
+                    <select id="category" name="category_url" required>
+                        <option value="">-- Sélectionnez un secteur --</option>
+                        {% for cat in categories %}
+                            <option value="{{ cat.url }}" data-name="{{ cat.name }}">{{ cat.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="pages">Nombre de pages à scraper :</label>
+                    <input type="number" id="pages" name="max_pages" value="1" min="1" max="10">
+                </div>
+
+                <button type="submit" class="btn-primary">
+                    <span class="btn-text">Lancer le Scraping</span>
+                    <span class="loader hidden"></span>
+                </button>
+            </form>
+
+            <div id="map-container" class="tab-content hidden">
+                <div class="map-wrapper">
+                    <iframe 
+                        width="100%" 
+                        height="450" 
+                        frameborder="0" 
+                        style="border:0; border-radius: 12px;" 
+                        src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3980644.407945894!2d10.12642295!3d7.36967345!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x1061375492218319%3A0x29672769018c6444!2sCameroun!5e0!3m2!1sfr!2scm!4v1710940000000!5m2!1sfr!2scm" 
+                        allowfullscreen>
+                    </iframe>
+                </div>
+                <p class="map-hint">Utilisez la barre de recherche sur la carte pour trouver une entreprise spécifique.</p>
+            </div>
+        </section>
+
+        <section id="scrape-results" class="card hidden">
+            <div class="result-header">
+                <h2>Résultats Secteur (<span id="scrape-count">0</span>)</h2>
+                <a id="scrape-download" href="#" class="btn-secondary">Télécharger Excel</a>
+            </div>
+            <div class="table-wrapper">
+                <table id="scrape-table">
+                    <thead>
+                        <tr>
+                            <th>Entreprise</th>
+                            <th>Téléphone</th>
+                            <th>Site Web</th>
+                            <th>Localisation</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        // Tab switching
+        const tabs = document.querySelectorAll('.tab-btn');
+        const contents = document.querySelectorAll('.tab-content');
+
+        tabs.forEach(tab => {
+            tab.onclick = () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                contents.forEach(c => {
+                    c.classList.remove('active');
+                    c.classList.add('hidden');
+                });
+                
+                tab.classList.add('active');
+                const target = document.getElementById(tab.dataset.target);
+                target.classList.remove('hidden');
+                target.classList.add('active');
+            };
+        });
+
+        const mapIframe = document.querySelector('#map-container iframe');
+        const mapTabBtn = document.querySelector('.tab-btn[data-target="map-container"]');
+
+        function showOnMap(name, address) {
+            const query = `${name} ${address}`.trim();
+            const newSrc = `https://maps.google.com/maps?q=${encodeURIComponent(query)}&output=embed`;
+            mapIframe.src = newSrc;
+            
+            // Switch to map tab
+            mapTabBtn.click();
+            document.getElementById('map-container').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            const form = e.target;
+            const btn = form.querySelector('.btn-primary');
+            const loader = btn.querySelector('.loader');
+            const btnText = btn.querySelector('.btn-text');
+            
+            const resultSection = document.getElementById(`scrape-results`);
+            const countSpan = document.getElementById(`scrape-count`);
+            const tbody = document.querySelector(`#scrape-table tbody`);
+            const downloadLink = document.getElementById(`scrape-download`);
+
+            btnText.style.opacity = '0';
+            loader.classList.remove('hidden');
+            btn.disabled = true;
+
+            const formData = new FormData(form);
+            const selectedOption = form.category_url.options[form.category_url.selectedIndex];
+            formData.append('category_name', selectedOption.getAttribute('data-name'));
+
+            try {
+                const response = await fetch('/scrape', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    countSpan.textContent = data.count;
+                    tbody.innerHTML = '';
+                    
+                    data.companies.forEach(company => {
+                        const tr = document.createElement('tr');
+                        const safeName = (company.name || "").replace(/'/g, "\\'");
+                        const safeAddress = (company.coords || "Cameroun").replace(/'/g, "\\'");
+                        
+                        tr.innerHTML = `
+                            <td><strong class="clickable-name" onclick="showOnMap('${safeName}', '${safeAddress}')">${company.name}</strong></td>
+                            <td>${company.phone}</td>
+                            <td>${company.website !== 'N/A' ? `<a href="${company.website}" target="_blank">Visiter</a>` : 'N/A'}</td>
+                            <td>${company.coords || 'N/A'}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+
+                    downloadLink.href = `/download/${data.filename}`;
+                    resultSection.classList.remove('hidden');
+                    resultSection.scrollIntoView({ behavior: 'smooth' });
+                } else {
+                    alert('Erreur: ' + data.error);
+                }
+            } catch (err) {
+                alert('Une erreur réseau est survenue.');
+            } finally {
+                btnText.style.opacity = '1';
+                loader.classList.add('hidden');
+                btn.disabled = false;
+            }
+        }
+
+        document.getElementById('scrape-form').onsubmit = handleFormSubmit;
+    </script>
+</body>
+</html>
