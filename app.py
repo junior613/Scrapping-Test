@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
 import time
 import os
 import scraper
@@ -77,25 +79,61 @@ def main():
         # Étape 3: Export et Affichage
         st.success(f"Opération terminée. {len(companies_to_process)} fiches complétées.")
         
-        # Carte Interactive
-        map_data = []
+        # --- CARTE INTERACTIVE AVEC FOLIUM ---
+
+        # 1. Filtrer les entreprises avec des coordonnées valides
+        companies_with_coords = []
         for c in companies_to_process:
             coords = c.get('coords', 'N/A')
-            # Vérifie si on a des coordonnées valides (format "lat,lon")
             if coords and coords != 'N/A' and ',' in str(coords):
                 try:
-                    lat, lon = coords.split(',')
-                    map_data.append({'lat': float(lat), 'lon': float(lon)})
-                except ValueError:
+                    lat, lon = map(float, coords.split(','))
+                    c['lat'] = lat
+                    c['lon'] = lon
+                    companies_with_coords.append(c)
+                except (ValueError, IndexError):
                     continue
         
-        if map_data:
-            st.subheader(f"📍 Carte des entreprises ({len(map_data)} localisées)")
-            st.map(pd.DataFrame(map_data))
+        if not companies_with_coords:
+            st.warning("Aucune coordonnée GPS trouvée pour afficher sur la carte.")
         else:
-            st.warning("Aucune coordonnée GPS trouvée pour ces entreprises.")
+            # 2. Créer un selectbox pour choisir une entreprise
+            company_names = ["- Vue d'ensemble -"] + [c['name'] for c in companies_with_coords]
+            selected_name = st.selectbox("🎯 Choisir une entreprise pour la localiser", options=company_names)
+
+            # 3. Déterminer le centre de la carte et le zoom
+            map_center = [6, 12] # Centre approximatif du Cameroun
+            map_zoom = 6
+            selected_company_obj = None
+
+            if selected_name != "- Vue d'ensemble -":
+                selected_company_obj = next((c for c in companies_with_coords if c['name'] == selected_name), None)
+                if selected_company_obj:
+                    map_center = [selected_company_obj['lat'], selected_company_obj['lon']]
+                    map_zoom = 17
+
+            # 4. Créer et afficher la carte Folium
+            st.subheader(f"📍 Carte interactive ({len(companies_with_coords)} localisées)")
+            m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="cartodbdark_matter")
+
+            for company in companies_with_coords:
+                popup_html = f"<b>{company['name']}</b>"
+                if company.get('google_maps_url') and company['google_maps_url'] != 'N/A':
+                    popup_html += f'<br><a href="{company["google_maps_url"]}" target="_blank">Ouvrir dans Google Maps</a>'
+                
+                is_selected = (selected_company_obj and company['name'] == selected_company_obj['name'])
+                
+                folium.Marker(
+                    location=[company['lat'], company['lon']],
+                    popup=folium.Popup(popup_html, max_width=300),
+                    tooltip=company['name'],
+                    icon=folium.Icon(color='red' if is_selected else 'blue', icon='star' if is_selected else 'info-sign')
+                ).add_to(m)
+
+            st_folium(m, width=725, height=500)
 
         # Aperçu des données
+        st.subheader("📋 Données brutes")
         st.dataframe(companies_to_process)
         
         # Export Excel
