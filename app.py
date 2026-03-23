@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 import time
 import os
 import scraper
@@ -39,6 +40,7 @@ def main():
         selected_cat_url = cat_dict[selected_cat_name]
         
         max_pages = st.number_input("Nombre de pages à scraper", min_value=1, max_value=50, value=1)
+        limit = st.slider("Limite d'entreprises à analyser (Détails + GPS)", min_value=1, max_value=100, value=15)
         
         start_scraping = st.button("Lancer le scraping", type="primary")
 
@@ -61,8 +63,6 @@ def main():
             st.write("Récupération des détails (Site web, GPS)...")
             progress_bar = st.progress(0)
             
-            # Limite pour éviter les blocages (similaire à ton ancien code)
-            limit = 15
             companies_to_process = companies[:limit]
             
             for i, company in enumerate(companies_to_process):
@@ -77,6 +77,24 @@ def main():
         # Étape 3: Export et Affichage
         st.success(f"Opération terminée. {len(companies_to_process)} fiches complétées.")
         
+        # Carte Interactive
+        map_data = []
+        for c in companies_to_process:
+            coords = c.get('coords', 'N/A')
+            # Vérifie si on a des coordonnées valides (format "lat,lon")
+            if coords and coords != 'N/A' and ',' in str(coords):
+                try:
+                    lat, lon = coords.split(',')
+                    map_data.append({'lat': float(lat), 'lon': float(lon)})
+                except ValueError:
+                    continue
+        
+        if map_data:
+            st.subheader(f"📍 Carte des entreprises ({len(map_data)} localisées)")
+            st.map(pd.DataFrame(map_data))
+        else:
+            st.warning("Aucune coordonnée GPS trouvée pour ces entreprises.")
+
         # Aperçu des données
         st.dataframe(companies_to_process)
         
