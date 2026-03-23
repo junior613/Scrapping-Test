@@ -1,6 +1,9 @@
-flask
+streamlit
+pandas
+folium
+streamlit-folium
 requests
 beautifulsoup4
+python-dotenv
 openpyxl
 lxml
-python-dotenv
